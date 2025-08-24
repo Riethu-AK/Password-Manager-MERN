@@ -81,7 +81,23 @@ function encryptText(plain) {
   return { cipher: encrypted.toString('base64'), iv: iv.toString('base64'), tag: tag.toString('base64') };
 }
 
-function decryptText({ cipher: c, iv, tag }) {
+function decryptText(encrypted) {
+  // defensive: if no data, return null
+  if (!encrypted) return null;
+
+  // if it's already a plain string, return as-is
+  if (typeof encrypted === 'string') return encrypted;
+
+  // attempt to locate expected fields (support slight variations)
+  const c = encrypted.cipher || encrypted.c || encrypted.encrypted || encrypted.cipherText;
+  const iv = encrypted.iv || encrypted.ivBase64 || encrypted.nonce;
+  const tag = encrypted.tag || encrypted.authTag;
+
+  if (!c || !iv || !tag) {
+    console.warn('Decryption skipped: missing cipher/iv/tag fields');
+    return null;
+  }
+
   try {
     const key = getEncKey();
     const decipher = crypto.createDecipheriv(ENC_ALGO, key, Buffer.from(iv, 'base64'));
@@ -164,6 +180,23 @@ app.get("/messages", authMiddleware, async (req, res) => {
       password: decryptText(msg.password)
     }));
     res.json(decryptedMsgs);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET single message decrypted (useful if stored password wasn't decrypted earlier)
+app.get('/messages/:id/decrypt', authMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const msg = await Message.findById(id);
+    if (!msg) return res.status(404).json({ error: 'Not found' });
+    let plaintext = null;
+    if (msg.password) {
+      if (typeof msg.password === 'string') plaintext = msg.password;
+      else plaintext = decryptText(msg.password);
+    }
+    res.json({ password: plaintext });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
