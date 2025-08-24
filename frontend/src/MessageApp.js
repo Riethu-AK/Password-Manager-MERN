@@ -94,7 +94,22 @@ function MessageApp({ onLogout, user }) {
 
   const [visiblePasswords, setVisiblePasswords] = useState({});
   const toggleShow = (id) => {
-    setVisiblePasswords((v) => ({ ...v, [id]: !v[id] }));
+    const key = String(id);
+    setVisiblePasswords((v) => ({ ...v, [key]: !v[key] }));
+  };
+
+  // fetch a single decrypted password from server when needed
+  const fetchPassword = async (id) => {
+    try {
+      const token = user && user.token ? user.token : (localStorage.getItem('ps_user') ? JSON.parse(localStorage.getItem('ps_user')).token : null);
+      const res = await fetch(`http://localhost:5000/messages/${id}/decrypt`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data.password || null;
+    } catch (err) {
+      console.error('fetchPassword error', err);
+      return null;
+    }
   };
 
   const filtered = messages.filter((m) => {
@@ -181,7 +196,7 @@ function MessageApp({ onLogout, user }) {
             <button type="submit">Save</button>
           </form>
 
-          <div className="controls">
+            <div className="controls">
             <div className="search-input">
               <input
                 placeholder="Search by site or email..."
@@ -189,7 +204,7 @@ function MessageApp({ onLogout, user }) {
                 onChange={(e) => setQuery(e.target.value)}
               />
             </div>
-            <button className="small-btn" onClick={fetchMessages}>Refresh</button>
+            <button type="button" className="small-btn" onClick={fetchMessages}>Refresh</button>
           </div>
 
           <div className="saved-entries">
@@ -207,13 +222,24 @@ function MessageApp({ onLogout, user }) {
                 </div>
 
                 <div className="password-text">
-                  {visiblePasswords[msg._id] ? msg.password : msg.password ? "*".repeat(msg.password.length) : "—"}
+                  {visiblePasswords[String(msg._id)] ? msg.password : msg.password ? "*".repeat(msg.password.length) : "—"}
                 </div>
 
                 <div className="entry-actions">
-                  <button className="action-btn btn-show" onClick={() => toggleShow(msg._id)}>{visiblePasswords[msg._id] ? 'Hide' : 'Show'}</button>
-                  <button className="action-btn btn-copy" onClick={() => copyToClipboard(msg.password || '')}>Copy</button>
-                  <button className="action-btn btn-delete" onClick={() => handleDelete(msg._id)}>Delete</button>
+                  <button type="button" className="action-btn btn-show" onClick={async () => {
+                    const key = String(msg._id);
+                    // if currently hidden and password not present in message, fetch it
+                    if (!visiblePasswords[key] && (!msg.password || typeof msg.password !== 'string' || msg.password.length === 0)) {
+                      const pw = await fetchPassword(msg._id);
+                      if (pw !== null) {
+                        // update messages with decrypted password
+                        setMessages((prev) => prev.map(m => m._id === msg._id ? { ...m, password: pw } : m));
+                      }
+                    }
+                    toggleShow(msg._id);
+                  }}>{visiblePasswords[String(msg._id)] ? 'Hide' : 'Show'}</button>
+                  <button type="button" className="action-btn btn-copy" onClick={() => copyToClipboard(msg.password || '')}>Copy</button>
+                  <button type="button" className="action-btn btn-delete" onClick={() => handleDelete(msg._id)}>Delete</button>
                 </div>
               </div>
             ))}
