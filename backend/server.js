@@ -29,9 +29,8 @@ mongoose
 const MessageSchema = new mongoose.Schema({
   text: { type: String, required: true },
   email: { type: String, required: true },
-  // password may be stored as an encrypted object { cipher, iv, tag }
-  // or as a plaintext string during migration. Use Mixed to allow both.
-  password: { type: mongoose.Schema.Types.Mixed, required: true },
+  // store password as plain string (encryption removed)
+  password: { type: String, required: true },
   createdAt: { type: Date, default: Date.now }
 });
 
@@ -52,65 +51,7 @@ const jwt = require('jsonwebtoken');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_change_me';
 
-const crypto = require('crypto');
-
-// Encryption key: prefer ENCRYPTION_KEY (base64 or raw), otherwise derive from JWT_SECRET (dev only)
-function getEncKey() {
-  const envKey = process.env.ENCRYPTION_KEY;
-  if (envKey) {
-    try {
-      // if base64
-      const buf = Buffer.from(envKey, 'base64');
-      if (buf.length === 32) return buf;
-    } catch (e) {
-      // fall through
-    }
-    // fallback: use raw string hashed to 32 bytes
-    return crypto.createHash('sha256').update(envKey).digest();
-  }
-  // dev fallback - derive from JWT_SECRET
-  return crypto.createHash('sha256').update(JWT_SECRET).digest();
-}
-
-const ENC_ALGO = 'aes-256-gcm';
-
-function encryptText(plain) {
-  const key = getEncKey();
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv(ENC_ALGO, key, iv);
-  const encrypted = Buffer.concat([cipher.update(String(plain), 'utf8'), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  return { cipher: encrypted.toString('base64'), iv: iv.toString('base64'), tag: tag.toString('base64') };
-}
-
-function decryptText(encrypted) {
-  // defensive: if no data, return null
-  if (!encrypted) return null;
-
-  // if it's already a plain string, return as-is
-  if (typeof encrypted === 'string') return encrypted;
-
-  // attempt to locate expected fields (support slight variations)
-  const c = encrypted.cipher || encrypted.c || encrypted.encrypted || encrypted.cipherText;
-  const iv = encrypted.iv || encrypted.ivBase64 || encrypted.nonce;
-  const tag = encrypted.tag || encrypted.authTag;
-
-  if (!c || !iv || !tag) {
-    console.warn('Decryption skipped: missing cipher/iv/tag fields');
-    return null;
-  }
-
-  try {
-    const key = getEncKey();
-    const decipher = crypto.createDecipheriv(ENC_ALGO, key, Buffer.from(iv, 'base64'));
-    decipher.setAuthTag(Buffer.from(tag, 'base64'));
-    const out = Buffer.concat([decipher.update(Buffer.from(c, 'base64')), decipher.final()]);
-    return out.toString('utf8');
-  } catch (err) {
-    console.error('Decryption failed', err.message);
-    return null;
-  }
-}
+// encryption removed
 
 // simple middleware to protect routes
 const authMiddleware = (req, res, next) => {
@@ -163,8 +104,7 @@ app.post('/auth/login', async (req, res) => {
 app.post("/messages", authMiddleware, async (req, res) => {
   try {
     const { text, email, password } = req.body;
-  const encryptedPassword = encryptText(password);
-  const newMsg = new Message({ text, email, password: encryptedPassword });
+  const newMsg = new Message({ text, email, password });
     await newMsg.save();
     res.status(201).json(newMsg);
   } catch (err) {
@@ -176,29 +116,21 @@ app.post("/messages", authMiddleware, async (req, res) => {
 // ✅ GET route (Fetch all messages)
 app.get("/messages", authMiddleware, async (req, res) => {
   try {
-    const msgs = await Message.find().sort({ createdAt: -1 });
-    const decryptedMsgs = msgs.map(msg => ({
-      ...msg.toObject(),
-      password: decryptText(msg.password)
-    }));
-    res.json(decryptedMsgs);
+  const msgs = await Message.find().sort({ createdAt: -1 });
+  res.json(msgs);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 // GET single message decrypted (useful if stored password wasn't decrypted earlier)
+// decrypt endpoint removed since passwords are stored plaintext
 app.get('/messages/:id/decrypt', authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
     const msg = await Message.findById(id);
     if (!msg) return res.status(404).json({ error: 'Not found' });
-    let plaintext = null;
-    if (msg.password) {
-      if (typeof msg.password === 'string') plaintext = msg.password;
-      else plaintext = decryptText(msg.password);
-    }
-    res.json({ password: plaintext });
+    res.json({ password: msg.password });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -216,22 +148,9 @@ app.delete("/messages/:id", authMiddleware, async (req, res) => {
 });
 
 // Migration helper (manual) - encrypt existing plaintext passwords
+// migration endpoint removed — no-op when using plaintext storage
 app.post('/migrate-encrypt', authMiddleware, async (req, res) => {
-  try {
-    const all = await Message.find();
-    let updated = 0;
-    for (const m of all) {
-      if (m.password && typeof m.password === 'string') {
-        const enc = encryptText(m.password);
-        m.password = enc;
-        await m.save();
-        updated++;
-      }
-    }
-    res.json({ migrated: updated });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  res.json({ migrated: 0, message: 'Encryption removed, no migration necessary' });
 });
 
 
