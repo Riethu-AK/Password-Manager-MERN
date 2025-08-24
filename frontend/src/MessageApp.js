@@ -98,19 +98,7 @@ function MessageApp({ onLogout, user }) {
     setVisiblePasswords((v) => ({ ...v, [key]: !v[key] }));
   };
 
-  // fetch a single decrypted password from server when needed
-  const fetchPassword = async (id) => {
-    try {
-      const token = user && user.token ? user.token : (localStorage.getItem('ps_user') ? JSON.parse(localStorage.getItem('ps_user')).token : null);
-      const res = await fetch(`http://localhost:5000/messages/${id}/decrypt`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
-      if (!res.ok) return null;
-      const data = await res.json();
-      return data.password || null;
-    } catch (err) {
-      console.error('fetchPassword error', err);
-      return null;
-    }
-  };
+  // encryption removed on server; messages come with plaintext passwords
 
   const filtered = messages.filter((m) => {
     const q = query.trim().toLowerCase();
@@ -226,18 +214,7 @@ function MessageApp({ onLogout, user }) {
                 </div>
 
                 <div className="entry-actions">
-                  <button type="button" className="action-btn btn-show" onClick={async () => {
-                    const key = String(msg._id);
-                    // if currently hidden and password not present in message, fetch it
-                    if (!visiblePasswords[key] && (!msg.password || typeof msg.password !== 'string' || msg.password.length === 0)) {
-                      const pw = await fetchPassword(msg._id);
-                      if (pw !== null) {
-                        // update messages with decrypted password
-                        setMessages((prev) => prev.map(m => m._id === msg._id ? { ...m, password: pw } : m));
-                      }
-                    }
-                    toggleShow(msg._id);
-                  }}>{visiblePasswords[String(msg._id)] ? 'Hide' : 'Show'}</button>
+                  <button type="button" className="action-btn btn-show" onClick={() => toggleShow(msg._id)}>{visiblePasswords[String(msg._id)] ? 'Hide' : 'Show'}</button>
                   <button type="button" className="action-btn btn-copy" onClick={() => copyToClipboard(msg.password || '')}>Copy</button>
                   <button type="button" className="action-btn btn-delete" onClick={() => handleDelete(msg._id)}>Delete</button>
                 </div>
