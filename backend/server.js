@@ -203,6 +203,40 @@ app.post('/migrate-assign-owners', authMiddleware, async (req, res) => {
   }
 });
 
+// Cleanup: delete all orphaned messages (messages without owner)
+app.delete('/cleanup-orphaned-messages', authMiddleware, async (req, res) => {
+  try {
+    const result = await Message.deleteMany({ owner: { $exists: false } });
+    res.json({ 
+      deleted: result.deletedCount,
+      message: `Deleted ${result.deletedCount} orphaned messages`
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Debug: list all messages with owner info
+app.get('/debug-messages', authMiddleware, async (req, res) => {
+  try {
+    const all = await Message.find({}, 'text email owner createdAt').populate('owner', 'username email');
+    const orphaned = await Message.countDocuments({ owner: { $exists: false } });
+    res.json({ 
+      total: all.length,
+      orphaned,
+      messages: all.map(m => ({
+        id: m._id,
+        text: m.text,
+        email: m.email,
+        owner: m.owner ? m.owner.username : 'NO_OWNER',
+        created: m.createdAt
+      }))
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Migration helper (manual) - encrypt existing plaintext passwords
 // migration endpoint removed — no-op when using plaintext storage
 app.post('/migrate-encrypt', authMiddleware, async (req, res) => {
