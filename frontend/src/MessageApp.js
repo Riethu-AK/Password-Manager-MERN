@@ -3,7 +3,7 @@ import "./MessageApp.css";
 import { useToasts } from './components/ToastProvider';
 
 function MessageApp({ onLogout, user }) {
-  const [formData, setFormData] = useState({ text: "", email: "", password: "" });
+  const [formData, setFormData] = useState({ text: "", password: "" });
   const [messages, setMessages] = useState([]);
   const [query, setQuery] = useState("");
   const [activePage, setActivePage] = useState("home");
@@ -35,7 +35,7 @@ function MessageApp({ onLogout, user }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.text || !formData.email || !formData.password) {
+    if (!formData.text || !formData.password) {
       alert("Please fill all fields!");
       return;
     }
@@ -55,7 +55,7 @@ function MessageApp({ onLogout, user }) {
       }
       setMessages((prev) => [data, ...prev]);
       add('Saved', 'success');
-      setFormData({ text: "", email: "", password: "" });
+  setFormData({ text: "", password: "" });
     } catch (error) {
       console.error("Error saving message:", error);
       add('Save failed', 'error');
@@ -163,14 +163,6 @@ function MessageApp({ onLogout, user }) {
               value={formData.text}
               onChange={(e) => setFormData({ ...formData, text: e.target.value })}
               placeholder="e.g. github.com"
-            />
-
-            <label>Email</label>
-            <input
-              type="email"
-              value={formData.email}
-              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              placeholder="you@company.com"
             />
 
             <label>Password</label>

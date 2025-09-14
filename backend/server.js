@@ -1,9 +1,20 @@
+// dotenv.config() should only be called after require('dotenv')
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const dotenv = require("dotenv");
+const nodemailer = require("nodemailer");
 
 dotenv.config();
+// Nodemailer transporter setup (Gmail)
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.GMAIL_USER,
+    pass: process.env.GMAIL_PASS
+  }
+});
+
 const app = express();
 const PORT = process.env.PORT || 5000;
 
@@ -25,7 +36,7 @@ mongoose
 // ✅ Message Schema & Model
 const MessageSchema = new mongoose.Schema({
   text: { type: String, required: true },
-  email: { type: String, required: true },
+  email: { type: String }, // now optional, always filled by backend
   // store password as plain string (encryption removed)
   password: { type: String, required: true },
   // owner of the message (link to User)
@@ -42,6 +53,11 @@ const UserSchema = new mongoose.Schema({
   passwordHash: { type: String, required: true },
   // base64 JPEG/PNG data URL of selfie captured at signup (optional)
   photo: { type: String },
+  // user role: 'user' or 'admin'
+  role: { type: String, enum: ['user', 'admin'], default: 'user' },
+  // track login stats
+  lastLogin: { type: Date },
+  loginCount: { type: Number, default: 0 },
   createdAt: { type: Date, default: Date.now }
 });
 
@@ -66,6 +82,14 @@ const authMiddleware = (req, res, next) => {
   } catch (err) {
     return res.status(401).json({ error: 'Invalid token' });
   }
+};
+
+// middleware to check admin role
+const adminMiddleware = (req, res, next) => {
+  if (!req.user || req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+  next();
 };
 
 // Auth routes
@@ -122,8 +146,27 @@ app.post('/auth/login', async (req, res) => {
     if (!user) return res.status(401).json({ error: 'Invalid credentials' });
     const ok = await bcrypt.compare(password, user.passwordHash);
     if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
-    const token = jwt.sign({ id: user._id, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
-    res.json({ token, user: { id: user._id, username: user.username, email: user.email } });
+    
+    // Update login stats
+    user.lastLogin = new Date();
+    user.loginCount = (user.loginCount || 0) + 1;
+    await user.save();
+    
+    const token = jwt.sign({ 
+      id: user._id, 
+      username: user.username, 
+      role: user.role || 'user' 
+    }, JWT_SECRET, { expiresIn: '7d' });
+    
+    res.json({ 
+      token, 
+      user: { 
+        id: user._id, 
+        username: user.username, 
+        email: user.email,
+        role: user.role || 'user'
+      } 
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -132,12 +175,33 @@ app.post('/auth/login', async (req, res) => {
 // ✅ POST route (Save message)
 app.post("/messages", authMiddleware, async (req, res) => {
   try {
-    const { text, email, password } = req.body;
-  // attach owner from authenticated token
-  const ownerId = req.user && req.user.id;
-  if (!ownerId) return res.status(401).json({ error: 'Unauthorized' });
-  const newMsg = new Message({ text, email, password, owner: ownerId });
+    const { text, password } = req.body;
+    // attach owner from authenticated token
+    const ownerId = req.user && req.user.id;
+    if (!ownerId) return res.status(401).json({ error: 'Unauthorized' });
+
+    // Find the user's registered email
+    const user = await mongoose.model('User').findById(ownerId);
+    if (!user || !user.email) return res.status(400).json({ error: 'User email not found' });
+
+    const newMsg = new Message({ text, email: user.email, password, owner: ownerId });
     await newMsg.save();
+
+    // Send email notification to the user's registered email
+    const mailOptions = {
+      from: process.env.GMAIL_USER,
+      to: user.email,
+      subject: 'New Password Added to Your Account',
+      text: `A new password for "${text}" was added to your account in Cryptix Password Manager on ${new Date().toLocaleString()}.\n\nIf this was not you, please log in and review your saved passwords.\n\n- Cryptix Team`
+    };
+    transporter.sendMail(mailOptions, (error, info) => {
+      if (error) {
+        console.error('Email send error:', error);
+      } else {
+        console.log('Email sent:', info.response);
+      }
+    });
+
     res.status(201).json(newMsg);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -231,6 +295,131 @@ app.get('/debug-messages', authMiddleware, async (req, res) => {
         owner: m.owner ? m.owner.username : 'NO_OWNER',
         created: m.createdAt
       }))
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ========== ADMIN ROUTES ==========
+
+// Admin Dashboard - Get all users and their stats
+app.get('/admin/dashboard', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    // Get user stats
+    const totalUsers = await User.countDocuments();
+    const totalMessages = await Message.countDocuments();
+    const usersWithMessages = await Message.distinct('owner');
+    
+    // Get users with their message counts
+    const users = await User.aggregate([
+      {
+        $lookup: {
+          from: 'messages',
+          localField: '_id',
+          foreignField: 'owner',
+          as: 'messages'
+        }
+      },
+      {
+        $project: {
+          username: 1,
+          email: 1,
+          role: 1,
+          loginCount: 1,
+          lastLogin: 1,
+          createdAt: 1,
+          messageCount: { $size: '$messages' }
+        }
+      },
+      {
+        $sort: { createdAt: -1 }
+      }
+    ]);
+    
+    // Get recent activity
+    const recentLogins = await User.find({ lastLogin: { $exists: true } })
+      .sort({ lastLogin: -1 })
+      .limit(10)
+      .select('username lastLogin');
+    
+    const recentMessages = await Message.find()
+      .populate('owner', 'username')
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .select('text email createdAt owner');
+    
+    res.json({
+      stats: {
+        totalUsers,
+        totalMessages,
+        activeUsers: usersWithMessages.length,
+        orphanedMessages: await Message.countDocuments({ owner: { $exists: false } })
+      },
+      users,
+      recentActivity: {
+        logins: recentLogins,
+        messages: recentMessages
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Admin - Get specific user details
+app.get('/admin/users/:userId', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const user = await User.findById(userId).select('-passwordHash');
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    
+    const messages = await Message.find({ owner: userId })
+      .sort({ createdAt: -1 })
+      .select('text email createdAt');
+    
+    res.json({
+      user,
+      messages,
+      messageCount: messages.length
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Admin - Create admin user (one-time setup)
+app.post('/admin/setup', async (req, res) => {
+  try {
+    const { username, password, setupKey } = req.body;
+    
+    // Simple setup key check (you can change this)
+    if (setupKey !== 'SETUP_ADMIN_2025') {
+      return res.status(403).json({ error: 'Invalid setup key' });
+    }
+    
+    // Check if admin already exists
+    const existingAdmin = await User.findOne({ role: 'admin' });
+    if (existingAdmin) {
+      return res.status(409).json({ error: 'Admin already exists' });
+    }
+    
+    const existing = await User.findOne({ username });
+    if (existing) return res.status(409).json({ error: 'Username already taken' });
+    
+    const salt = await bcrypt.genSalt(10);
+    const hash = await bcrypt.hash(password, salt);
+    const admin = new User({ 
+      username, 
+      passwordHash: hash, 
+      role: 'admin',
+      email: 'admin@cryptix.local'
+    });
+    await admin.save();
+    
+    res.status(201).json({ 
+      message: 'Admin user created successfully',
+      admin: { username: admin.username, role: admin.role }
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

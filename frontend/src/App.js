@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import MessageApp from "./MessageApp";
 import Login from "./Login";
+import AdminDashboard from "./AdminDashboard";
 
 function App() {
   const [user, setUser] = useState(null);
@@ -40,7 +41,16 @@ function App() {
     setUser(null);
   };
 
-  return user ? <MessageApp onLogout={handleLogout} user={user} /> : <Login onLogin={handleLogin} />;
+  // If user is logged in, check their role
+  if (user) {
+    if (user.user && user.user.role === 'admin') {
+      return <AdminDashboard token={user.token} onLogout={handleLogout} />;
+    } else {
+      return <MessageApp onLogout={handleLogout} user={user} />;
+    }
+  }
+
+  return <Login onLogin={handleLogin} />;
 }
 
 export default App;
