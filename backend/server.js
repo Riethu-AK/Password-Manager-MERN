@@ -25,6 +25,13 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
+// Serve React build folder (combined deployment)
+const path = require('path');
+app.use(express.static(path.join(__dirname, '../frontend/build')));
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../frontend/build', 'index.html'));
+});
+
 // Simple request logger for debugging
 // Google OAuth2 login endpoint (must be after app and middleware setup)
 app.post('/auth/google', async (req, res) => {
