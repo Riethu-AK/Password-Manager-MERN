@@ -1,9 +1,42 @@
 import React, { useState } from 'react';
+import { GoogleOAuthProvider, GoogleLogin } from '@react-oauth/google';
 import './Login.css';
 import { useToasts } from './components/ToastProvider';
 
 function Login({ onLogin }) {
+  // Add missing state and functions
+  const [signupPhoto, setSignupPhoto] = useState(null);
+
+  const openCamera = async () => {
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({ video: true });
+      return s;
+    } catch (err) {
+      add('Camera access denied', 'error');
+      return null;
+    }
+  };
+
+  const capturePhotoFromStream = (stream) => {
+    const video = document.createElement('video');
+    video.srcObject = stream;
+    video.play();
+    return new Promise((resolve) => {
+      video.onloadedmetadata = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth || 320;
+        canvas.height = video.videoHeight || 240;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+        video.pause();
+        if (stream.getTracks) stream.getTracks().forEach(t => t.stop());
+        resolve(dataUrl);
+      };
+    });
+  };
   const [mode, setMode] = useState('signin'); // or 'signup' or 'admin-setup'
+  const [googleLoggedIn, setGoogleLoggedIn] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [email, setEmail] = useState('');
@@ -15,13 +48,15 @@ function Login({ onLogin }) {
   const handleSubmit = (e) => {
     e.preventDefault();
     setError('');
-    
+    if (googleLoggedIn) {
+      // Google login already handled, skip form submit
+      return;
+    }
     if (mode === 'admin-setup') {
       if (!username || !password || !setupKey) {
         setError('Please complete all fields for admin setup');
         return;
       }
-      
       setLoading(true);
       fetch('http://localhost:5000/admin/setup', {
         method: 'POST',
@@ -44,7 +79,6 @@ function Login({ onLogin }) {
         });
       return;
     }
-    
     if (!username || !password || (mode === 'signup' && !email)) {
       setError('Please complete all required fields');
       return;
@@ -59,7 +93,7 @@ function Login({ onLogin }) {
       setLoading(false);
     };
 
-  if (mode === 'signin') {
+    if (mode === 'signin') {
       fetch(`${base}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -93,40 +127,6 @@ function Login({ onLogin }) {
         })
         .catch((err) => doError(err.message || 'Signup error'));
     }
-  };
-
-  // camera / photo handling
-  const [signupPhoto, setSignupPhoto] = useState(null);
-  // const [camStream, setCamStream] = useState(null); // unused for now
-
-  const openCamera = async () => {
-    try {
-      const s = await navigator.mediaDevices.getUserMedia({ video: true });
-      // setCamStream(s); // commented out for now
-      return s;
-    } catch (err) {
-      add('Camera access denied', 'error');
-      return null;
-    }
-  };
-
-  const capturePhotoFromStream = (stream) => {
-    const video = document.createElement('video');
-    video.srcObject = stream;
-    video.play();
-    return new Promise((resolve) => {
-      video.onloadedmetadata = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = video.videoWidth || 320;
-        canvas.height = video.videoHeight || 240;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-        video.pause();
-        if (stream.getTracks) stream.getTracks().forEach(t => t.stop());
-        resolve(dataUrl);
-      };
-    });
   };
 
   // const handleTakeSignupPhoto = async () => {
@@ -199,41 +199,47 @@ function Login({ onLogin }) {
     }
   };
 
+
   return (
-    <div className="login-wrapper">
-      <div className="login-card">
-        <form onSubmit={handleSubmit}>
-          <div className="brand">🔒 Cryptix</div>
-          <h2>
-            {mode === 'signin' ? 'Welcome back' : 
-             mode === 'signup' ? 'Create account' : 
-             'Admin Setup'}
-          </h2>
-          <p className="muted">
-            {mode === 'signin' ? 'Sign in to access your Cryptix vault' : 
-             mode === 'signup' ? 'Sign up to save your passwords securely' :
-             'Create the first admin account'}
-          </p>
-          
-          <label>Username</label>
-          <input type="text" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Choose a username" />
+    <GoogleOAuthProvider clientId="942596418627-t0jik8i9tikm0ad4cul65kde7klrd0f4.apps.googleusercontent.com">
+      <div className="login-wrapper">
+        <div className="login-card">
+          <form onSubmit={handleSubmit}>
+            <div className="brand">🔒 Cryptix</div>
+            <h2>
+              {mode === 'signin' ? 'Welcome back' : 
+               mode === 'signup' ? 'Create account' : 
+               'Admin Setup'}
+            </h2>
+            <p className="muted">
+              {mode === 'signin' ? 'Sign in to access your Cryptix vault' : 
+               mode === 'signup' ? 'Sign up to save your passwords securely' :
+               'Create the first admin account'}
+            </p>
 
-          {mode === 'signup' && (
-            <>
-              <label>Email</label>
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" />
-            </>
-          )}
+            {/* Hide username/password fields if Google login is successful */}
+            {!googleLoggedIn && <>
+              <label>Username</label>
+              <input type="text" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Choose a username" />
 
-          {mode === 'admin-setup' && (
-            <>
-              <label>Setup Key</label>
-              <input type="password" value={setupKey} onChange={(e) => setSetupKey(e.target.value)} placeholder="Enter admin setup key" />
-            </>
-          )}
+              {mode === 'signup' && (
+                <>
+                  <label>Email</label>
+                  <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" />
+                </>
+              )}
 
-          <label>Password</label>
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Create a strong password" />
+              {mode === 'admin-setup' && (
+                <>
+                  <label>Setup Key</label>
+                  <input type="password" value={setupKey} onChange={(e) => setSetupKey(e.target.value)} placeholder="Enter admin setup key" />
+                </>
+              )}
+
+              <label>Password</label>
+              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Create a strong password" />
+            </>}
+
 
           <button type="submit" className="primary" disabled={loading}>
             {loading ? 'Please wait...' : 
@@ -241,6 +247,32 @@ function Login({ onLogin }) {
              mode === 'signup' ? 'Create account' :
              'Create Admin Account'}
           </button>
+          {/* Google Sign-In button only for sign-in mode */}
+          {mode === 'signin' && (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginTop: 12, marginBottom: 16 }}>
+              <GoogleLogin
+                onSuccess={credentialResponse => {
+                  fetch('http://localhost:5000/auth/google', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ token: credentialResponse.credential })
+                  })
+                  .then(res => res.json())
+                  .then(data => {
+                    if (data.token) {
+                      setGoogleLoggedIn(true);
+                      onLogin(data);
+                    } else {
+                      setError(data.error || 'Google login failed');
+                    }
+                  });
+                }}
+                onError={() => {
+                  setError('Google Sign-In failed');
+                }}
+              />
+            </div>
+          )}
 
           {error && <div className="error">{error}</div>}
 
@@ -285,7 +317,8 @@ function Login({ onLogin }) {
         </div>
       </div>
     </div>
+  </GoogleOAuthProvider>
   );
-}
 
+}
 export default Login;

@@ -1,0 +1,32 @@
+@startuml
+left to right direction
+
+actor User
+actor Admin
+actor "Google OAuth Provider" as Google
+
+User --> (Register Account)
+User --> (Login)
+User --> (Login with Google)
+User --> (View Saved Passwords)
+User --> (Add Password Entry)
+User --> (Edit/Change Password)
+User --> (Delete Password Entry)
+User --> (Request OTP for Password Change)
+User --> (Recover Password)
+User --> (Logout)
+
+Admin --> (Login as Admin)
+Admin --> (View All Users)
+Admin --> (View User Activity/Statistics)
+Admin --> (Manage User Accounts)
+Admin --> (View All Password Entries)
+Admin --> (Monitor System Usage)
+
+(Google Sign-In) <.. (Login with Google)
+Google --> (Google Sign-In)
+
+(Edit/Change Password) <.. (Request OTP for Password Change)
+(Recover Password) <.. (Request OTP for Password Change)
+
+@enduml

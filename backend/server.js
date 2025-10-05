@@ -1,3 +1,7 @@
+// ...existing code...
+const { OAuth2Client } = require('google-auth-library');
+const googleClient = new OAuth2Client();
+// ...existing code...
 // dotenv.config() should only be called after require('dotenv')
 const express = require("express");
 const mongoose = require("mongoose");
@@ -22,6 +26,34 @@ app.use(cors());
 app.use(express.json());
 
 // Simple request logger for debugging
+// Google OAuth2 login endpoint (must be after app and middleware setup)
+app.post('/auth/google', async (req, res) => {
+  const { token } = req.body;
+  try {
+    const ticket = await googleClient.verifyIdToken({
+      idToken: token,
+      audience: '942596418627-t0jik8i9tikm0ad4cul65kde7klrd0f4.apps.googleusercontent.com' // your Google client ID
+    });
+    const payload = ticket.getPayload();
+    // Find or create user in DB
+    let user = await User.findOne({ email: payload.email });
+    if (!user) {
+      user = new User({
+        username: payload.email.split('@')[0],
+        email: payload.email,
+        passwordHash: '', // no password for Google users
+        role: 'user',
+        photo: payload.picture || ''
+      });
+      await user.save();
+    }
+    // Issue JWT
+    const jwtToken = jwt.sign({ id: user._id, username: user.username, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+    res.json({ token: jwtToken, user: { id: user._id, username: user.username, email: user.email, role: user.role } });
+  } catch (err) {
+    res.status(401).json({ error: 'Invalid Google token' });
+  }
+});
 app.use((req, res, next) => {
   console.log(`[REQ] ${new Date().toISOString()} ${req.method} ${req.originalUrl}`);
   next();
@@ -235,6 +267,69 @@ app.get('/messages/:id/decrypt', authMiddleware, async (req, res) => {
 });
 
 // ✅ DELETE route (remove by ID)
+// Simple in-memory OTP store (for demo only)
+const otpStore = {};
+
+// Endpoint to request OTP (for demo, not secure)
+app.post('/messages/:id/request-otp', authMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const msg = await Message.findById(id);
+    if (!msg) return res.status(404).json({ error: 'Message not found' });
+    // Only owner can request OTP
+    if (String(msg.owner) !== String(req.user.id)) return res.status(403).json({ error: 'Forbidden' });
+    // Generate OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    otpStore[id] = { otp, expires: Date.now() + 15 * 60 * 1000 };
+    // Send OTP via email (using nodemailer)
+    const mailOptions = {
+      from: process.env.GMAIL_USER,
+      to: msg.email,
+      subject: 'Your Cryptix OTP',
+      text: `Your OTP for password change is: ${otp}`
+    };
+    transporter.sendMail(mailOptions, (error, info) => {
+      if (error) {
+        console.error('OTP email error:', error);
+      } else {
+        console.log('OTP email sent:', info.response);
+      }
+    });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Endpoint to verify OTP and change password
+app.post('/messages/:id/change-password', authMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { otp, newPassword } = req.body;
+    const msg = await Message.findById(id);
+    if (!msg) return res.status(404).json({ error: 'Message not found' });
+    if (String(msg.owner) !== String(req.user.id)) return res.status(403).json({ error: 'Forbidden' });
+    // OTP verification
+    if (otp) {
+      const entry = otpStore[id];
+      if (!entry || entry.otp !== otp || entry.expires < Date.now()) {
+        return res.status(400).json({ error: 'Invalid or expired OTP' });
+      }
+      return res.json({ success: true });
+    }
+    // Password change (after OTP verified)
+    if (newPassword) {
+      msg.password = newPassword;
+      await msg.save();
+      // Remove OTP from store
+      delete otpStore[id];
+      return res.json({ success: true });
+    }
+    return res.status(400).json({ error: 'Missing otp or newPassword' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 app.delete("/messages/:id", authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
