@@ -25,7 +25,6 @@ const transporter = nodemailer.createTransport({
 });
 
 const app = express();
-host this project 
 const PORT = process.env.PORT || 5000;
 
 app.use(cors());
