@@ -1,6 +1,6 @@
 // ...existing code...
 const { OAuth2Client } = require('google-auth-library');
-const googleClient = new OAuth2Client();
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 // ...existing code...
 // dotenv.config() should only be called after require('dotenv')
 const express = require("express");
@@ -36,13 +36,13 @@ app.get('*', (req, res) => {
 // Google OAuth2 login endpoint (must be after app and middleware setup)
 app.post('/auth/google', async (req, res) => {
   const { token } = req.body;
+  if (!token) return res.status(400).json({ error: 'Missing Google token' });
   try {
     const ticket = await googleClient.verifyIdToken({
       idToken: token,
-      audience: '942596418627-t0jik8i9tikm0ad4cul65kde7klrd0f4.apps.googleusercontent.com' // your Google client ID
+      audience: process.env.GOOGLE_CLIENT_ID
     });
     const payload = ticket.getPayload();
-    // Find or create user in DB
     let user = await User.findOne({ email: payload.email });
     if (!user) {
       user = new User({
@@ -54,10 +54,17 @@ app.post('/auth/google', async (req, res) => {
       });
       await user.save();
     }
-    // Issue JWT
-    const jwtToken = jwt.sign({ id: user._id, username: user.username, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
-    res.json({ token: jwtToken, user: { id: user._id, username: user.username, email: user.email, role: user.role } });
+    const jwtToken = jwt.sign(
+      { id: user._id, username: user.username, email: user.email, role: user.role },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+    res.json({
+      token: jwtToken,
+      user: { id: user._id, username: user.username, email: user.email, role: user.role }
+    });
   } catch (err) {
+    console.error('Google sign-in error:', err);
     res.status(401).json({ error: 'Invalid Google token' });
   }
 });
