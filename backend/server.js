@@ -1,6 +1,11 @@
 // ...existing code...
-const { OAuth2Client } = require('google-auth-library');
-const googleClient = new OAuth2Client();
+// Google Sign-In (optional). Only initialize if GOOGLE_CLIENT_ID is provided.
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+let googleClient = null;
+if (GOOGLE_CLIENT_ID) {
+  const { OAuth2Client } = require('google-auth-library');
+  googleClient = new OAuth2Client(GOOGLE_CLIENT_ID);
+}
 // ...existing code...
 // dotenv.config() should only be called after require('dotenv')
 const express = require("express");
@@ -20,7 +25,7 @@ const transporter = nodemailer.createTransport({
 });
 
 const app = express();
-
+host this project 
 const PORT = process.env.PORT || 5000;
 
 app.use(cors());
@@ -32,11 +37,14 @@ const path = require('path');
 // Simple request logger for debugging
 // Google OAuth2 login endpoint (must be after app and middleware setup)
 app.post('/auth/google', async (req, res) => {
+  if (!googleClient || !GOOGLE_CLIENT_ID) {
+    return res.status(503).json({ error: 'Google Sign-In disabled' });
+  }
   const { token } = req.body;
   try {
     const ticket = await googleClient.verifyIdToken({
       idToken: token,
-      audience: '942596418627-t0jik8i9tikm0ad4cul65kde7klrd0f4.apps.googleusercontent.com' // your Google client ID
+      audience: GOOGLE_CLIENT_ID
     });
     const payload = ticket.getPayload();
     // Find or create user in DB
