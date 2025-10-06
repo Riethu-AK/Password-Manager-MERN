@@ -7,6 +7,8 @@ const AdminDashboard = ({ token, onLogout }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
+  const apiBase = process.env.REACT_APP_API_URL;
+
   useEffect(() => {
     fetchDashboardData();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -14,7 +16,7 @@ const AdminDashboard = ({ token, onLogout }) => {
   const fetchDashboardData = async () => {
     try {
       setLoading(true);
-      const response = await fetch('http://localhost:5000/admin/dashboard', {
+      const response = await fetch(`${apiBase}/admin/dashboard`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       
@@ -34,7 +36,7 @@ const AdminDashboard = ({ token, onLogout }) => {
 
   const fetchUserDetails = async (userId) => {
     try {
-      const response = await fetch(`http://localhost:5000/admin/users/${userId}`, {
+      const response = await fetch(`${apiBase}/admin/users/${userId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       

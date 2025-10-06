@@ -1,7 +1,9 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import "./MessageApp.css";
 import { useToasts } from './components/ToastProvider';
 import emailjs from 'emailjs-com';
+
+const apiBase = process.env.REACT_APP_API_URL;
 
 function MessageApp({ onLogout, user }) {
   const [formData, setFormData] = useState({ text: "", password: "", email: "" });
@@ -15,15 +17,12 @@ function MessageApp({ onLogout, user }) {
   const [otpVerified, setOtpVerified] = useState(false);
   const [newPassword, setNewPassword] = useState("");
 
-  useEffect(() => {
-    fetchMessages();
-  }, []);
-  const { toasts, add, remove } = useToasts();
+  const { toasts, add } = useToasts();
 
-  const fetchMessages = async () => {
+  const fetchMessages = useCallback(async () => {
     try {
       const token = user && user.token ? user.token : (localStorage.getItem('ps_user') ? JSON.parse(localStorage.getItem('ps_user')).token : null);
-      const res = await fetch("http://localhost:5000/messages", { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+      const res = await fetch(`${apiBase}/messages`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
       const data = await res.json();
       if (!res.ok) {
         console.error('Failed to fetch messages', data);
@@ -35,10 +34,14 @@ function MessageApp({ onLogout, user }) {
       }
       setMessages(data);
     } catch (err) {
-  console.error("Error fetching messages:", err);
-  add('Failed to fetch entries', 'error');
+      console.error("Error fetching messages:", err);
+      add('Failed to fetch entries', 'error');
     }
-  };
+  }, [user, onLogout, add]);
+
+  useEffect(() => {
+    fetchMessages();
+  }, [fetchMessages]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -48,7 +51,7 @@ function MessageApp({ onLogout, user }) {
     }
     try {
       const token = user && user.token ? user.token : (localStorage.getItem('ps_user') ? JSON.parse(localStorage.getItem('ps_user')).token : null);
-      const res = await fetch("http://localhost:5000/messages", {
+      const res = await fetch(`${apiBase}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
   body: JSON.stringify(formData),
@@ -73,7 +76,7 @@ function MessageApp({ onLogout, user }) {
     if (!window.confirm("Delete this entry?")) return;
     try {
       const token = user && user.token ? user.token : (localStorage.getItem('ps_user') ? JSON.parse(localStorage.getItem('ps_user')).token : null);
-      const res = await fetch(`http://localhost:5000/messages/${id}`, { method: "DELETE", headers: token ? { Authorization: `Bearer ${token}` } : {} });
+      const res = await fetch(`${apiBase}/messages/${id}`, { method: "DELETE", headers: token ? { Authorization: `Bearer ${token}` } : {} });
       if (!res.ok) {
         const data = await res.json();
         console.error('Delete failed', data);
@@ -139,6 +142,7 @@ function MessageApp({ onLogout, user }) {
     window.location.reload();
   };
 
+  // eslint-disable-next-line no-unused-vars
   const sendOtpEmail = async (userEmail, otp) => {
     // Replace with your emailjs service/template/user IDs
     const serviceId = 'service_g2e4m96';
@@ -178,7 +182,7 @@ function MessageApp({ onLogout, user }) {
     const msgId = changeModal.msgId;
     const token = user && user.token ? user.token : (localStorage.getItem('ps_user') ? JSON.parse(localStorage.getItem('ps_user')).token : null);
     try {
-      const res = await fetch(`http://localhost:5000/messages/${msgId}/request-otp`, {
+      const res = await fetch(`${apiBase}/messages/${msgId}/request-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }
       });
@@ -210,9 +214,9 @@ function MessageApp({ onLogout, user }) {
       <header className="header">
         <div className="logo">🔒 Cryptix</div>
         <nav className="nav-links">
-          <a href="#" onClick={(e)=>{e.preventDefault(); setActivePage('home')}}>Home</a>
-          <a href="#" onClick={(e)=>{e.preventDefault(); setActivePage('user')}}>User</a>
-          <a href="#" onClick={(e)=>{e.preventDefault(); handleLogoutClick()}}>Logout</a>
+          <button onClick={(e)=>{e.preventDefault(); setActivePage('home')}}>Home</button>
+          <button onClick={(e)=>{e.preventDefault(); setActivePage('user')}}>User</button>
+          <button onClick={(e)=>{e.preventDefault(); handleLogoutClick()}}>Logout</button>
         </nav>
       </header>
 
@@ -370,7 +374,7 @@ function MessageApp({ onLogout, user }) {
                 const token = user && user.token ? user.token : (localStorage.getItem('ps_user') ? JSON.parse(localStorage.getItem('ps_user')).token : null);
                 let res, data;
                 try {
-                  res = await fetch(`http://localhost:5000/messages/${msgId}/change-password`, {
+                  res = await fetch(`${apiBase}/messages/${msgId}/change-password`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
                     body: JSON.stringify({ otp: enteredOtp })
@@ -420,7 +424,7 @@ function MessageApp({ onLogout, user }) {
                 const token = user && user.token ? user.token : (localStorage.getItem('ps_user') ? JSON.parse(localStorage.getItem('ps_user')).token : null);
                 let res, data;
                 try {
-                  res = await fetch(`http://localhost:5000/messages/${msgId}/change-password`, {
+                  res = await fetch(`${apiBase}/messages/${msgId}/change-password`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
                     body: JSON.stringify({ newPassword })

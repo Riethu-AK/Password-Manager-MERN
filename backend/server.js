@@ -1,6 +1,6 @@
 // ...existing code...
 const { OAuth2Client } = require('google-auth-library');
-const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+const googleClient = new OAuth2Client();
 // ...existing code...
 // dotenv.config() should only be called after require('dotenv')
 const express = require("express");
@@ -20,29 +20,26 @@ const transporter = nodemailer.createTransport({
 });
 
 const app = express();
+
 const PORT = process.env.PORT || 5000;
 
 app.use(cors());
 app.use(express.json());
 
-// Serve React build folder (combined deployment)
+// Serve React build folder (combined deployment) - moved to end
 const path = require('path');
-app.use(express.static(path.join(__dirname, '../frontend/build')));
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '../frontend/build', 'index.html'));
-});
 
 // Simple request logger for debugging
 // Google OAuth2 login endpoint (must be after app and middleware setup)
 app.post('/auth/google', async (req, res) => {
   const { token } = req.body;
-  if (!token) return res.status(400).json({ error: 'Missing Google token' });
   try {
     const ticket = await googleClient.verifyIdToken({
       idToken: token,
-      audience: process.env.GOOGLE_CLIENT_ID
+      audience: '942596418627-t0jik8i9tikm0ad4cul65kde7klrd0f4.apps.googleusercontent.com' // your Google client ID
     });
     const payload = ticket.getPayload();
+    // Find or create user in DB
     let user = await User.findOne({ email: payload.email });
     if (!user) {
       user = new User({
@@ -54,17 +51,10 @@ app.post('/auth/google', async (req, res) => {
       });
       await user.save();
     }
-    const jwtToken = jwt.sign(
-      { id: user._id, username: user.username, email: user.email, role: user.role },
-      JWT_SECRET,
-      { expiresIn: '7d' }
-    );
-    res.json({
-      token: jwtToken,
-      user: { id: user._id, username: user.username, email: user.email, role: user.role }
-    });
+    // Issue JWT
+    const jwtToken = jwt.sign({ id: user._id, username: user.username, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+    res.json({ token: jwtToken, user: { id: user._id, username: user.username, email: user.email, role: user.role } });
   } catch (err) {
-    console.error('Google sign-in error:', err);
     res.status(401).json({ error: 'Invalid Google token' });
   }
 });
@@ -192,18 +182,18 @@ app.post('/auth/login', async (req, res) => {
     if (!user) return res.status(401).json({ error: 'Invalid credentials' });
     const ok = await bcrypt.compare(password, user.passwordHash);
     if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
-    
+
     // Update login stats
     user.lastLogin = new Date();
     user.loginCount = (user.loginCount || 0) + 1;
     await user.save();
-    
+
     const token = jwt.sign({ 
       id: user._id, 
       username: user.username, 
       role: user.role || 'user' 
     }, JWT_SECRET, { expiresIn: '7d' });
-    
+
     res.json({ 
       token, 
       user: { 
@@ -419,7 +409,7 @@ app.get('/admin/dashboard', authMiddleware, adminMiddleware, async (req, res) =>
     const totalUsers = await User.countDocuments();
     const totalMessages = await Message.countDocuments();
     const usersWithMessages = await Message.distinct('owner');
-    
+
     // Get users with their message counts
     const users = await User.aggregate([
       {
@@ -445,19 +435,19 @@ app.get('/admin/dashboard', authMiddleware, adminMiddleware, async (req, res) =>
         $sort: { createdAt: -1 }
       }
     ]);
-    
+
     // Get recent activity
     const recentLogins = await User.find({ lastLogin: { $exists: true } })
       .sort({ lastLogin: -1 })
       .limit(10)
       .select('username lastLogin');
-    
+
     const recentMessages = await Message.find()
       .populate('owner', 'username')
       .sort({ createdAt: -1 })
       .limit(10)
       .select('text email createdAt owner');
-    
+
     res.json({
       stats: {
         totalUsers,
@@ -482,11 +472,11 @@ app.get('/admin/users/:userId', authMiddleware, adminMiddleware, async (req, res
     const { userId } = req.params;
     const user = await User.findById(userId).select('-passwordHash');
     if (!user) return res.status(404).json({ error: 'User not found' });
-    
+
     const messages = await Message.find({ owner: userId })
       .sort({ createdAt: -1 })
       .select('text email createdAt');
-    
+
     res.json({
       user,
       messages,
@@ -501,21 +491,21 @@ app.get('/admin/users/:userId', authMiddleware, adminMiddleware, async (req, res
 app.post('/admin/setup', async (req, res) => {
   try {
     const { username, password, setupKey } = req.body;
-    
+
     // Simple setup key check (you can change this)
     if (setupKey !== 'SETUP_ADMIN_2025') {
       return res.status(403).json({ error: 'Invalid setup key' });
     }
-    
+
     // Check if admin already exists
     const existingAdmin = await User.findOne({ role: 'admin' });
     if (existingAdmin) {
       return res.status(409).json({ error: 'Admin already exists' });
     }
-    
+
     const existing = await User.findOne({ username });
     if (existing) return res.status(409).json({ error: 'Username already taken' });
-    
+
     const salt = await bcrypt.genSalt(10);
     const hash = await bcrypt.hash(password, salt);
     const admin = new User({ 
@@ -525,7 +515,7 @@ app.post('/admin/setup', async (req, res) => {
       email: 'admin@cryptix.local'
     });
     await admin.save();
-    
+
     res.status(201).json({ 
       message: 'Admin user created successfully',
       admin: { username: admin.username, role: admin.role }
@@ -541,7 +531,13 @@ app.post('/migrate-encrypt', authMiddleware, async (req, res) => {
   res.json({ migrated: 0, message: 'Encryption removed, no migration necessary' });
 });
 
+// Serve React build folder (combined deployment)
+app.use(express.static(path.join(__dirname, '../frontend/build')));
 
+// Catch-all handler: send back React's index.html file for any non-API routes
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../frontend/build', 'index.html'));
+});
 
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);

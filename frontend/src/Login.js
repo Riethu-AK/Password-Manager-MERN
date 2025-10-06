@@ -1,12 +1,8 @@
 import React, { useState } from 'react';
-import { GoogleOAuthProvider, GoogleLogin } from '@react-oauth/google';
 import './Login.css';
 import { useToasts } from './components/ToastProvider';
 
 function Login({ onLogin }) {
-  // Add missing state and functions
-  const [signupPhoto, setSignupPhoto] = useState(null);
-
   const openCamera = async () => {
     try {
       const s = await navigator.mediaDevices.getUserMedia({ video: true });
@@ -36,7 +32,7 @@ function Login({ onLogin }) {
     });
   };
   const [mode, setMode] = useState('signin'); // or 'signup' or 'admin-setup'
-  const [googleLoggedIn, setGoogleLoggedIn] = useState(false);
+  const [googleLoggedIn] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [email, setEmail] = useState('');
@@ -48,10 +44,7 @@ function Login({ onLogin }) {
   const handleSubmit = (e) => {
     e.preventDefault();
     setError('');
-    if (googleLoggedIn) {
-      // Google login already handled, skip form submit
-      return;
-    }
+    // Google login functionality removed
     if (mode === 'admin-setup') {
       if (!username || !password || !setupKey) {
         setError('Please complete all fields for admin setup');
@@ -84,7 +77,7 @@ function Login({ onLogin }) {
       return;
     }
 
-    const base = 'http://localhost:5000';
+    const base = process.env.REACT_APP_API_URL;
     setLoading(true);
     setError('');
     const doError = (msg) => {
@@ -110,8 +103,7 @@ function Login({ onLogin }) {
         .catch((err) => doError(err.message || 'Login error'));
     } else {
       // signup -> call backend
-      // include photo if captured
-      const payload = { username, password, email, photo: signupPhoto };
+      const payload = { username, password, email };
       fetch('http://localhost:5000/auth/signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -201,7 +193,6 @@ function Login({ onLogin }) {
 
 
   return (
-    <GoogleOAuthProvider clientId="942596418627-t0jik8i9tikm0ad4cul65kde7klrd0f4.apps.googleusercontent.com">
       <div className="login-wrapper">
         <div className="login-card">
           <form onSubmit={handleSubmit}>
@@ -247,32 +238,6 @@ function Login({ onLogin }) {
              mode === 'signup' ? 'Create account' :
              'Create Admin Account'}
           </button>
-          {/* Google Sign-In button only for sign-in mode */}
-          {mode === 'signin' && (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginTop: 12, marginBottom: 16 }}>
-              <GoogleLogin
-                onSuccess={credentialResponse => {
-                  fetch('http://localhost:5000/auth/google', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ token: credentialResponse.credential })
-                  })
-                  .then(res => res.json())
-                  .then(data => {
-                    if (data.token) {
-                      setGoogleLoggedIn(true);
-                      onLogin(data);
-                    } else {
-                      setError(data.error || 'Google login failed');
-                    }
-                  });
-                }}
-                onError={() => {
-                  setError('Google Sign-In failed');
-                }}
-              />
-            </div>
-          )}
 
           {error && <div className="error">{error}</div>}
 
@@ -317,7 +282,6 @@ function Login({ onLogin }) {
         </div>
       </div>
     </div>
-  </GoogleOAuthProvider>
   );
 
 }
