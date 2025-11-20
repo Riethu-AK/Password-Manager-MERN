@@ -1,20 +1,24 @@
-// ...existing code...
+// Load environment variables FIRST before accessing any process.env
+const dotenv = require("dotenv");
+dotenv.config();
+
 // Google Sign-In (optional). Only initialize if GOOGLE_CLIENT_ID is provided.
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 let googleClient = null;
 if (GOOGLE_CLIENT_ID) {
   const { OAuth2Client } = require('google-auth-library');
   googleClient = new OAuth2Client(GOOGLE_CLIENT_ID);
+  console.log('✅ Google Sign-In enabled');
+} else {
+  console.log('⚠️  Google Sign-In disabled (GOOGLE_CLIENT_ID not set)');
 }
-// ...existing code...
-// dotenv.config() should only be called after require('dotenv')
+
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
-const dotenv = require("dotenv");
 const nodemailer = require("nodemailer");
-
-dotenv.config();
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 // Nodemailer transporter setup (Gmail)
 const transporter = nodemailer.createTransport({
   service: 'gmail',
@@ -37,32 +41,82 @@ const path = require('path');
 // Google OAuth2 login endpoint (must be after app and middleware setup)
 app.post('/auth/google', async (req, res) => {
   if (!googleClient || !GOOGLE_CLIENT_ID) {
+    console.error('Google Sign-In not configured. GOOGLE_CLIENT_ID:', GOOGLE_CLIENT_ID);
     return res.status(503).json({ error: 'Google Sign-In disabled' });
   }
   const { token } = req.body;
+  if (!token) {
+    return res.status(400).json({ error: 'Token required' });
+  }
+  console.log('Verifying Google token with Client ID:', GOOGLE_CLIENT_ID);
   try {
     const ticket = await googleClient.verifyIdToken({
       idToken: token,
       audience: GOOGLE_CLIENT_ID
     });
     const payload = ticket.getPayload();
+    if (!payload.email) {
+      return res.status(400).json({ error: 'Email not provided by Google' });
+    }
+
     // Find or create user in DB
     let user = await User.findOne({ email: payload.email });
     if (!user) {
+      // Generate a unique username from email
+      let baseUsername = payload.email.split('@')[0];
+      let username = baseUsername;
+      let counter = 1;
+      // Ensure username is unique
+      while (await User.findOne({ username })) {
+        username = `${baseUsername}${counter}`;
+        counter++;
+      }
+
       user = new User({
-        username: payload.email.split('@')[0],
+        username: username,
         email: payload.email,
-        passwordHash: '', // no password for Google users
+        provider: 'google',
+        passwordHash: '', // intentionally empty for Google users
         role: 'user',
         photo: payload.picture || ''
       });
       await user.save();
     }
+
+    // Update login stats
+    user.lastLogin = new Date();
+    user.loginCount = (user.loginCount || 0) + 1;
+    await user.save();
+
     // Issue JWT
-    const jwtToken = jwt.sign({ id: user._id, username: user.username, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
-    res.json({ token: jwtToken, user: { id: user._id, username: user.username, email: user.email, role: user.role } });
+    const jwtToken = jwt.sign({ 
+      id: user._id, 
+      username: user.username, 
+      email: user.email, 
+      role: user.role 
+    }, JWT_SECRET, { expiresIn: '7d' });
+    
+    res.json({ 
+      token: jwtToken, 
+      user: { 
+        id: user._id, 
+        username: user.username, 
+        email: user.email, 
+        role: user.role 
+      } 
+    });
   } catch (err) {
-    res.status(401).json({ error: 'Invalid Google token' });
+    console.error('Google auth error:', err);
+    console.error('Error details:', {
+      message: err.message,
+      code: err.code,
+      clientId: GOOGLE_CLIENT_ID,
+      hasToken: !!token
+    });
+    res.status(401).json({ 
+      error: 'Invalid Google token',
+      details: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
   }
 });
 app.use((req, res, next) => {
@@ -93,7 +147,14 @@ const Message = mongoose.model("Message", MessageSchema);
 const UserSchema = new mongoose.Schema({
   username: { type: String, required: true, unique: true },
   email: { type: String },
-  passwordHash: { type: String, required: true },
+  provider: { type: String, enum: ['local', 'google'], default: 'local' },
+  passwordHash: { 
+    type: String, 
+    required: function() {
+      return this.provider !== 'google';
+    },
+    default: ''
+  },
   // base64 JPEG/PNG data URL of selfie captured at signup (optional)
   photo: { type: String },
   // user role: 'user' or 'admin'
@@ -105,9 +166,6 @@ const UserSchema = new mongoose.Schema({
 });
 
 const User = mongoose.model("User", UserSchema);
-
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_change_me';
 
@@ -289,25 +347,41 @@ app.post('/messages/:id/request-otp', authMiddleware, async (req, res) => {
     if (!msg) return res.status(404).json({ error: 'Message not found' });
     // Only owner can request OTP
     if (String(msg.owner) !== String(req.user.id)) return res.status(403).json({ error: 'Forbidden' });
+
+    // Make sure we always have the latest email for this user
+    const owner = await User.findById(msg.owner);
+    if (!owner || !owner.email) {
+      return res.status(400).json({ error: 'User email not found. Please update your profile with a valid email.' });
+    }
+
+    // Backfill message email if it was missing (legacy data)
+    if (!msg.email) {
+      msg.email = owner.email;
+      await msg.save();
+    }
+
     // Generate OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     otpStore[id] = { otp, expires: Date.now() + 15 * 60 * 1000 };
+
     // Send OTP via email (using nodemailer)
     const mailOptions = {
       from: process.env.GMAIL_USER,
-      to: msg.email,
+      to: owner.email,
       subject: 'Your Cryptix OTP',
-      text: `Your OTP for password change is: ${otp}`
+      text: `Hi ${owner.username},\n\nYour OTP for the password entry "${msg.text}" is: ${otp}\nThis code expires in 15 minutes.\n\nIf you didn't request this, please log in and review your account.\n\n- Cryptix Password Manager`
     };
+
     transporter.sendMail(mailOptions, (error, info) => {
       if (error) {
         console.error('OTP email error:', error);
       } else {
-        console.log('OTP email sent:', info.response);
+        console.log(`OTP email sent to ${owner.email}:`, info.response);
       }
     });
     res.json({ success: true });
   } catch (err) {
+    console.error('OTP request error:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -542,7 +616,7 @@ app.post('/migrate-encrypt', authMiddleware, async (req, res) => {
 app.use(express.static(path.join(__dirname, '../frontend/build')));
 
 // Catch-all handler: send back React's index.html file for any non-API routes
-app.get('*', (req, res) => {
+app.get(/.*/, (req, res) => {
   res.sendFile(path.join(__dirname, '../frontend/build', 'index.html'));
 });
 

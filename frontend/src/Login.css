@@ -43,6 +43,33 @@ form .switch{margin-block-start:6px;text-align:start}
 form input{background:rgba(255,255,255,0.04);color:#fff;border:0}
 form .primary{background:linear-gradient(90deg,#0ea5ff,#0b84ff);color:#021025;margin-block-start:8px}
 
+/* Google Sign-In button styling */
+form .google-login-wrapper {
+  margin-block-end: 12px;
+}
+form .google-login-divider {
+  text-align: center;
+  margin: 12px 0;
+  color: rgba(255,255,255,0.5);
+  font-size: 12px;
+  position: relative;
+}
+form .google-login-divider::before,
+form .google-login-divider::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: 40%;
+  height: 1px;
+  background: rgba(255,255,255,0.2);
+}
+form .google-login-divider::before {
+  left: 0;
+}
+form .google-login-divider::after {
+  right: 0;
+}
+
 @media (max-width:1100px){
   .login-card{inline-size:720px;flex-direction:column}
   .login-hero{align-items:center;text-align:center;padding:28px}

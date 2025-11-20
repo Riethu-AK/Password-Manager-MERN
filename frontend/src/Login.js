@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import './Login.css';
 import { useToasts } from './components/ToastProvider';
+import GoogleSignInButton from './components/GoogleSignInButton';
 
 function Login({ onLogin }) {
   const openCamera = async () => {
@@ -32,14 +33,50 @@ function Login({ onLogin }) {
     });
   };
   const [mode, setMode] = useState('signin'); // or 'signup' or 'admin-setup'
-  const [googleLoggedIn] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [email, setEmail] = useState('');
   const [setupKey, setSetupKey] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const { toasts, add } = useToasts();
+
+  const apiBase = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+  const hasGoogleClientId = !!process.env.REACT_APP_GOOGLE_CLIENT_ID;
+
+  // Google Sign-In handler
+  const handleGoogleSuccess = async (credentialResponse) => {
+    setGoogleLoading(true);
+    setError('');
+    try {
+      const res = await fetch(`${apiBase}/auth/google`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: credentialResponse.credential })
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Google Sign-In failed');
+      }
+
+      add('Signed in with Google', 'success');
+      if (onLogin) onLogin(data);
+    } catch (err) {
+      const errorMsg = err.message || 'Google Sign-In error';
+      setError(errorMsg);
+      add(errorMsg, 'error');
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
+
+  const handleGoogleError = () => {
+    setError('Google Sign-In failed');
+    add('Google Sign-In failed', 'error');
+    setGoogleLoading(false);
+  };
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -208,31 +245,38 @@ function Login({ onLogin }) {
                'Create the first admin account'}
             </p>
 
-            {/* Hide username/password fields if Google login is successful */}
-            {!googleLoggedIn && <>
-              <label>Username</label>
-              <input type="text" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Choose a username" />
+            {mode !== 'admin-setup' && (
+              <div className="google-login-wrapper">
+                <GoogleSignInButton
+                  onSuccess={handleGoogleSuccess}
+                  onError={handleGoogleError}
+                  disabled={googleLoading || loading || !hasGoogleClientId}
+                />
+                {hasGoogleClientId && <div className="google-login-divider">or</div>}
+              </div>
+            )}
 
-              {mode === 'signup' && (
-                <>
-                  <label>Email</label>
-                  <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" />
-                </>
-              )}
+            <label>Username</label>
+            <input type="text" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Choose a username" />
 
-              {mode === 'admin-setup' && (
-                <>
-                  <label>Setup Key</label>
-                  <input type="password" value={setupKey} onChange={(e) => setSetupKey(e.target.value)} placeholder="Enter admin setup key" />
-                </>
-              )}
+            {mode === 'signup' && (
+              <>
+                <label>Email</label>
+                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" />
+              </>
+            )}
 
-              <label>Password</label>
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Create a strong password" />
-            </>}
+            {mode === 'admin-setup' && (
+              <>
+                <label>Setup Key</label>
+                <input type="password" value={setupKey} onChange={(e) => setSetupKey(e.target.value)} placeholder="Enter admin setup key" />
+              </>
+            )}
 
+            <label>Password</label>
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Create a strong password" />
 
-          <button type="submit" className="primary" disabled={loading}>
+          <button type="submit" className="primary" disabled={loading || googleLoading}>
             {loading ? 'Please wait...' : 
              mode === 'signin' ? 'Sign in' : 
              mode === 'signup' ? 'Create account' :
